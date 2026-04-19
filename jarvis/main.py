@@ -8,7 +8,6 @@ import sounddevice as sd
 
 from . import stt, tts
 from .brain import JarvisBrain
-from .hotword import HotwordDetector
 from .skills import system as sys_skill
 from .skills import web as web_skill
 
@@ -30,7 +29,7 @@ _log = logging.getLogger(__name__)
 
 # ── Activation beep ───────────────────────────────────────────────────────────
 
-def _play_beep(freq: float = 440.0, duration: float = 0.2, volume: float = 0.3) -> None:
+def _play_beep(freq: float = 440.0, duration: float = 0.15, volume: float = 0.3) -> None:
     sr = 44_100
     t = np.linspace(0, duration, int(sr * duration), endpoint=False)
     wave = (volume * np.sin(2 * np.pi * freq * t)).astype(np.float32)
@@ -110,8 +109,9 @@ def _run_skill(skill: str, arg: str) -> str:
 
 async def _handle(brain: JarvisBrain) -> None:
     user_text = await asyncio.to_thread(stt.listen)
-    if not user_text:
-        _log.info("No speech captured after hotword — standing by.")
+
+    if not user_text or len(user_text.split()) < 2:
+        _log.info("Transcription too short or empty — skipping.")
         return
 
     _log.info("User  : %s", user_text)
@@ -142,25 +142,16 @@ async def main() -> None:
     await asyncio.to_thread(stt.calibrate)
     _log.info("Calibration complete.")
 
-    loop = asyncio.get_running_loop()
-    trigger: asyncio.Queue[bool] = asyncio.Queue()
-
-    detector = HotwordDetector(on_detected=lambda: loop.call_soon_threadsafe(trigger.put_nowait, True))
-    detector.start()
-    _log.info("J.A.R.V.I.S. online — awaiting hotword.")
-
     await tts.speak("Systems online. Ready to assist, Sir.")
+    _log.info("J.A.R.V.I.S. online — continuous listen mode.")
 
     try:
         while True:
-            await trigger.get()
-            _log.info("Hotword detected.")
             await asyncio.to_thread(_play_beep)
             await _handle(brain)
     except (KeyboardInterrupt, asyncio.CancelledError):
         _log.info("Shutdown signal received.")
     finally:
-        detector.stop()
         _log.info("J.A.R.V.I.S. offline.")
 
 
